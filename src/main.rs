@@ -1,28 +1,10 @@
-const TEST: &'static str = r#"
-   program Hello;
-   begin
-     writeln('Hello, world!');
-   end.
-"#;
+fn main() -> anyhow::Result<()> {
+    let data = std::fs::read("input.txt")?;
+    let data = String::from_utf8(data).unwrap();
 
-fn main() {
-    assert!(is_valid_code(TEST));
-}
+    // for c in data.chars() {
+    // println!("{c:?}");
+    // }
 
-fn is_valid_code(input: &'static str) -> bool {}
-
-mod parser {
-    pub struct Parser {
-        input: &'static str,
-    }
-
-    impl Parser {
-        pub fn parse(input: &'static str) {
-            let tokens = input.split(" ");
-        }
-    }
-}
-
-mod utils {
-    
+    Ok(())
 }

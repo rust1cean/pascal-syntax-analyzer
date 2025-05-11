@@ -24,7 +24,10 @@
         devShell = pkgs.mkShell {
           buildInputs = [
             rustToolchain
-            pkgs.rustup
+            pkgs.rustc
+            pkgs.cargo
+            pkgs.rustfmt
+            pkgs.clippy
             pkgs.rust-analyzer
             pkgs.pkg-config
             pkgs.openssl
