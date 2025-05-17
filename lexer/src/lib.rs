@@ -1,41 +1,40 @@
 pub mod lexer {
-    use std::str::Chars;
-
     use anyhow::Result;
 
-    use crate::symbols::*;
     use crate::token::{Position, Token};
 
-    #[derive(Debug, Default, PartialEq, Eq, Clone)]
-    pub struct Lexer {
-        mode: Mode,
-    }
+    pub fn read_as_tokens(input: &str) -> anyhow::Result<Box<[Token]>> {
+        let mut tokens = Vec::<Token>::new();
 
-    impl Lexer {
-        pub fn read_as_tokens(&mut self, input: &str) -> anyhow::Result<Box<[Token]>> {
-            let mut tokens = Vec::<Token>::new();
-            let mut span = Span::new(input);
+        let mut mode = Mode::Normal;
+        let mut from = 0;
+        let mut to = 0;
 
-            // On each iteration:
-            // process char
-            // error -> can't process char
-            //
-            // match token
-            // ready -> add token
-            // pending -> add char
-            // invalid -> error
+        let slice = || &input[from..=to];
 
-            for token in span {
-                // println!(
-                //     "({:>2}:{:<3}) {c:?}",
-                //     self.position.line, self.position.column
-                // );
-
-                println!("{token:?}");
+        for c in input.chars() {
+            match mode {
+                Mode::Normal => match c {
+                    c if c.is_whitespace() && from == to => {
+                        to += 1;
+                    }
+                    c if c.is_whitespace() => {
+                        // Validate token
+                        from = to;
+                    }
+                    c if c.is_alphabetic() || matches!(c, ':' | '<' | '>') => to += 1,
+                    '\'' => mode = Mode::String,
+                    _ => todo!(),
+                },
+                Mode::String => match c {
+                    '\'' => mode = Mode::Normal,
+                    _ => to += 1,
+                },
+                _ => (),
             }
-
-            Ok(tokens.into_boxed_slice())
         }
+
+        Ok(tokens.into_boxed_slice())
     }
 
     #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -47,82 +46,10 @@ pub mod lexer {
         Comment,
         Operator,
     }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct Span<'text> {
-        input: &'text str,
-        shift: usize,
-        len: usize,
-    }
-
-    impl Iterator for Span<'_> {
-        type Item = ();
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.shift = self.end() + 1;
-            self.len = 1;
-
-            (self.shift < self.len).then_some(())
-        }
-    }
-
-    impl<'text> Span<'text> {
-        pub fn new(input: &'text str) -> Self {
-            let shift = 0;
-            let len = 1;
-
-            Self { input, shift, len }
-        }
-
-        pub fn is_something_on_the_left(&self) -> Option<char> {
-            self.input[self.shift..].chars().next()
-        }
-
-        pub fn is_something_on_the_right(&self) -> Option<char> {
-            self.input[self.end()..].chars().next()
-        }
-
-        pub fn shift_while(&mut self, cb: fn(c: char) -> bool) {
-            while let Some(c) = self.is_something_on_the_left() {
-                match cb(c) {
-                    true => self.shift_by_one(),
-                    false => break,
-                }
-            }
-        }
-
-        pub fn extend_while(&mut self, cb: fn(c: char) -> bool) {
-            while let Some(c) = self.is_something_on_the_right() {
-                match cb(c) {
-                    true => self.extend_by_one(),
-                    false => break,
-                }
-            }
-        }
-
-        pub fn get(&self) -> &str {
-            &self.input[self.shift..self.end()]
-        }
-
-        fn shift_by_one(&mut self) {
-            self.shift += 1;
-        }
-
-        fn extend_by_one(&mut self) {
-            self.len += 1;
-        }
-
-        fn end(&self) -> usize {
-            let Self { input, shift, len } = *self;
-            let end = shift + len;
-
-            end.min(input.len())
-        }
-    }
 }
 
 pub mod token {
-    use crate::symbols::*;
+    use phf::phf_map;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Token {
@@ -159,12 +86,13 @@ pub mod token {
         type Error = &'static str;
 
         fn try_from(value: &str) -> Result<Self, Self::Error> {
-            Keyword::try_from(value)
-                .map(Self::Keyword)
-                .or_else(|_| Identifier::try_from(value).map(Self::Identifier))
-                .or_else(|_| Literal::try_from(value).map(Self::Literal))
-                .or_else(|_| Operator::try_from(value).map(Self::Operator))
-                .or_else(|_| SpecialSymbol::try_from(value).map(Self::SpecialSymbol))
+            // Keyword::try_from(value)
+            //     .map(Self::Keyword)
+            //     .or_else(|_| Identifier::try_from(value).map(Self::Identifier))
+            //     .or_else(|_| Literal::try_from(value).map(Self::Literal))
+            //     .or_else(|_| Operator::try_from(value).map(Self::Operator))
+            //     .or_else(|_| SpecialSymbol::try_from(value).map(Self::SpecialSymbol))
+            todo!()
         }
     }
 
@@ -242,25 +170,50 @@ pub mod token {
         RightBracket,
     }
 
-    impl TryFrom<&str> for SpecialSymbol {
-        type Error = &'static str;
-
-        fn try_from(value: &str) -> Result<Self, Self::Error> {
-            match value {
-                ":=" => Ok(Self::Assign),
-                ".." => Ok(Self::Range),
-                "." => Ok(Self::Dot),
-                ":" => Ok(Self::Colon),
-                ";" => Ok(Self::Semicolon),
-                "," => Ok(Self::Comma),
-                "(" => Ok(Self::LeftParenthesis),
-                ")" => Ok(Self::RightParenthesis),
-                "[" => Ok(Self::LeftBracket),
-                "]" => Ok(Self::RightBracket),
-                _ => Err("Can't recognize special symbol."),
-            }
-        }
+    pub fn parse_special_symbol(input: &str) -> Option<SpecialSymbol> {
+        SPECIAL_SYMBOLS.get(input).cloned()
     }
+
+    static SPECIAL_SYMBOLS: phf::Map<&'static str, SpecialSymbol> = phf_map! {
+        ":=" => SpecialSymbol::Assign,
+        ".." => SpecialSymbol::Range,
+        "." => SpecialSymbol::Dot,
+        ":" => SpecialSymbol::Colon,
+        ";" => SpecialSymbol::Semicolon,
+        "," => SpecialSymbol::Comma,
+        "(" => SpecialSymbol::LeftParenthesis,
+        ")" => SpecialSymbol::RightParenthesis,
+        "[" => SpecialSymbol::LeftBracket,
+        "]" => SpecialSymbol::RightBracket,
+
+    };
+
+    pub fn parse_keyword(input: &str) -> Option<Keyword> {
+        KEYWORDS.get(input).cloned()
+    }
+
+    static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
+        "begin" => Keyword::Begin,
+        "end" => Keyword::End,
+        "if" => Keyword::If,
+        "for" => Keyword::For,
+        "then" => Keyword::Then,
+        "else" => Keyword::Else,
+        "break" => Keyword::Break,
+        "continue" => Keyword::Continue,
+        "do" => Keyword::Do,
+        "repeat" => Keyword::Repeat,
+        "of" => Keyword::Of,
+        "var" => Keyword::Var,
+        "until" => Keyword::Until,
+        "type" => Keyword::Type,
+        "const" => Keyword::Const,
+        "function" => Keyword::Function,
+        "procedure" => Keyword::Procedure,
+        "program" => Keyword::Program,
+        "true" => Keyword::True,
+        "false" => Keyword::False,
+    };
 
     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
     pub enum Keyword {
@@ -293,35 +246,29 @@ pub mod token {
         False,
     }
 
-    impl TryFrom<&str> for Keyword {
-        type Error = &'static str;
-
-        fn try_from(value: &str) -> Result<Self, Self::Error> {
-            match value {
-                x if x.eq_ignore_ascii_case("begin") => Ok(Self::Begin),
-                x if x.eq_ignore_ascii_case("end") => Ok(Self::End),
-                x if x.eq_ignore_ascii_case("if") => Ok(Self::If),
-                x if x.eq_ignore_ascii_case("for") => Ok(Self::For),
-                x if x.eq_ignore_ascii_case("then") => Ok(Self::Then),
-                x if x.eq_ignore_ascii_case("else") => Ok(Self::Else),
-                x if x.eq_ignore_ascii_case("break") => Ok(Self::Break),
-                x if x.eq_ignore_ascii_case("continue") => Ok(Self::Continue),
-                x if x.eq_ignore_ascii_case("do") => Ok(Self::Do),
-                x if x.eq_ignore_ascii_case("repeat") => Ok(Self::Repeat),
-                x if x.eq_ignore_ascii_case("of") => Ok(Self::Of),
-                x if x.eq_ignore_ascii_case("var") => Ok(Self::Var),
-                x if x.eq_ignore_ascii_case("until") => Ok(Self::Until),
-                x if x.eq_ignore_ascii_case("type") => Ok(Self::Type),
-                x if x.eq_ignore_ascii_case("const") => Ok(Self::Const),
-                x if x.eq_ignore_ascii_case("function") => Ok(Self::Function),
-                x if x.eq_ignore_ascii_case("procedure") => Ok(Self::Procedure),
-                x if x.eq_ignore_ascii_case("program") => Ok(Self::Program),
-                x if x.eq_ignore_ascii_case("true") => Ok(Self::True),
-                x if x.eq_ignore_ascii_case("false") => Ok(Self::False),
-                _ => Err("Can't recognize keyword."),
-            }
-        }
+    pub fn parse_operator(input: &str) -> Option<Operator> {
+        OPERATORS.get(input).cloned()
     }
+
+    static OPERATORS: phf::Map<&'static str, Operator> = phf_map! {
+        "shl" => Operator::ShiftLeft,
+        "shr" => Operator::ShiftRight,
+        "==" => Operator::Equals,
+        "<>" => Operator::NotEquals,
+        "<=" => Operator::LessOrEquals,
+        ">=" => Operator::GreaterOrEquals,
+        "<" => Operator::Less,
+        ">" => Operator::Greater,
+        "+" => Operator::Add,
+        "-" => Operator::Sub,
+        "*" => Operator::Mul,
+        "/" => Operator::Div,
+        "%" => Operator::Mod,
+        "and" => Operator::And,
+        "or" => Operator::Or,
+        "not" => Operator::Not,
+        "xor" => Operator::Xor,
+    };
 
     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
     pub enum Operator {
@@ -336,12 +283,12 @@ pub mod token {
         Not,
 
         // relational
-        Equal,
-        NotEqual,
+        Equals,
+        NotEquals,
         Less,
-        LessOrEqual,
+        LessOrEquals,
         Greater,
-        GreaterOrEqual,
+        GreaterOrEquals,
 
         // arithmetic
         Add,
@@ -349,33 +296,6 @@ pub mod token {
         Mul,
         Div,
         Mod,
-    }
-
-    impl TryFrom<&str> for Operator {
-        type Error = &'static str;
-
-        fn try_from(value: &str) -> Result<Self, Self::Error> {
-            match value {
-                "<<" => Ok(Self::ShiftLeft),
-                ">>" => Ok(Self::ShiftRight),
-                "==" => Ok(Self::Equal),
-                "!=" => Ok(Self::NotEqual),
-                "<=" => Ok(Self::LessOrEqual),
-                ">=" => Ok(Self::GreaterOrEqual),
-                "<" => Ok(Self::Less),
-                ">" => Ok(Self::Greater),
-                "+" => Ok(Self::Add),
-                "-" => Ok(Self::Sub),
-                "*" => Ok(Self::Mul),
-                "/" => Ok(Self::Div),
-                "%" => Ok(Self::Mod),
-                x if x.eq_ignore_ascii_case("and") => Ok(Self::And),
-                x if x.eq_ignore_ascii_case("or") => Ok(Self::Or),
-                x if x.eq_ignore_ascii_case("not") => Ok(Self::Not),
-                x if x.eq_ignore_ascii_case("xor") => Ok(Self::Xor),
-                _ => Err("Can't recognize operator."),
-            }
-        }
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -386,51 +306,20 @@ pub mod token {
 
     impl Default for Position {
         fn default() -> Self {
-            Self {
-                line: Self::DEFAULT_LINE,
-                column: Self::DEFAULT_COLUMN,
-            }
+            Self { line: 1, column: 1 }
         }
     }
 
     impl Position {
-        const DEFAULT_COLUMN: usize = 1;
-        const DEFAULT_LINE: usize = 1;
+        pub fn add_column(&mut self) {
+            self.column += 1;
+        }
 
-        pub fn update(&mut self, c: char) {
-            match c {
-                '\n' => {
-                    self.column = Self::DEFAULT_COLUMN;
-                    self.line += 1;
-                }
-                _ => self.column += 1,
-            }
+        pub fn add_line(&mut self) {
+            self.line += 1;
+            self.column = 0;
         }
     }
-}
-
-pub mod symbols {
-    pub const DOT: char = '.';
-    pub const COLON: char = ':';
-    pub const SEMICOLON: char = ';';
-    pub const PLUS: char = '+';
-    pub const MINUS: char = '-';
-    pub const ASTERISK: char = '*';
-    pub const SOLIDUS: char = '/';
-    pub const REVERSE_SOLIDUS: char = '\\';
-    pub const PERCENT: char = '%';
-    pub const LESS: char = '<';
-    pub const GREATER: char = '>';
-    pub const COMMA: char = ',';
-    pub const EQUALS: char = '=';
-    pub const APOSTROPHE: char = '\'';
-    pub const EXCLAMATION: char = '!';
-    pub const LEFT_PARENT: char = '(';
-    pub const RIGHT_PARENT: char = ')';
-    pub const LEFT_BRACKET: char = '[';
-    pub const RIGHT_BRACKET: char = ']';
-    pub const LEFT_CURLY_BRACKET: char = '{';
-    pub const RIGHT_CURLY_BRACKET: char = '}';
 }
 
 #[cfg(test)]
@@ -441,7 +330,7 @@ mod tests {
     fn base() {
         let input = r##"
 { It's a comment "_" }
-program Simple;
+program MyProgram;
 Var
   A, B: Integer;
   C: Integer;
@@ -455,8 +344,6 @@ end."##;
 
         dbg!(input);
 
-        let mut lexer = lexer::Lexer::default();
-
-        let _ = lexer.read_as_tokens(input);
+        let _ = lexer::read_as_tokens(input);
     }
 }
