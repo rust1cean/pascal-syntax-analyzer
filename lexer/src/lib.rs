@@ -41,10 +41,9 @@ pub mod lexer {
     enum Mode {
         #[default]
         Normal,
-        String,
         Number,
+        String,
         Comment,
-        Operator,
     }
 }
 
@@ -52,16 +51,16 @@ pub mod token {
     use phf::phf_map;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Token {
-        value: &'static str,
+    pub struct Token<'token> {
+        value: &'token str,
         kind: TokenKind,
         position: Position,
     }
 
-    impl TryFrom<&'static str> for Token {
+    impl<'token> TryFrom<&'static str> for Token<'token> {
         type Error = &'static str;
 
-        fn try_from(value: &'static str) -> Result<Self, Self::Error> {
+        fn try_from(value: &'token str) -> Result<Self, Self::Error> {
             let kind = TokenKind::try_from(value)?;
             let position = Position::default();
 
@@ -79,20 +78,30 @@ pub mod token {
         Literal(Literal),
         Keyword(Keyword),
         Operator(Operator),
-        SpecialSymbol(SpecialSymbol),
+        Symbol(Symbol),
     }
 
     impl TryFrom<&str> for TokenKind {
         type Error = &'static str;
 
         fn try_from(value: &str) -> Result<Self, Self::Error> {
-            // Keyword::try_from(value)
-            //     .map(Self::Keyword)
-            //     .or_else(|_| Identifier::try_from(value).map(Self::Identifier))
-            //     .or_else(|_| Literal::try_from(value).map(Self::Literal))
-            //     .or_else(|_| Operator::try_from(value).map(Self::Operator))
-            //     .or_else(|_| SpecialSymbol::try_from(value).map(Self::SpecialSymbol))
-            todo!()
+            if let Some(literal) = Literal::parse(value) {
+                return Ok(Self::Literal(literal));
+            }
+
+            if let Some(keyword) = parse_keyword(value) {
+                return Ok(Self::Keyword(keyword));
+            }
+
+            if let Some(symbol) = parse_symbol(value) {
+                return Ok(Self::Symbol(symbol));
+            }
+
+            if let Some(operator) = parse_operator(value) {
+                return Ok(Self::Operator(operator));
+            }
+
+            Identifier::try_from(value).map(Self::Identifier)
         }
     }
 
@@ -103,17 +112,13 @@ pub mod token {
         type Error = &'static str;
 
         fn try_from(value: &str) -> Result<Self, Self::Error> {
-            let first_is_alphabetic = value
-                .chars()
-                .nth(0)
-                .ok_or("Expected identifier, got empty string.")?
-                .is_ascii_alphabetic();
+            let mut chars = value.chars();
 
-            let other_chars_are_alphanumeric = value[1..].chars().all(|c| c.is_alphanumeric());
+            let first_is_alphabetic = chars.next().is_some_and(|c| c.is_ascii_alphabetic());
 
-            match first_is_alphabetic && other_chars_are_alphanumeric {
+            match first_is_alphabetic && chars.all(|c| c.is_ascii_alphabetic()) {
                 true => Ok(Self),
-                false => Err("Can't parse identifier"),
+                false => Err("Invalid name of identfier."),
             }
         }
     }
@@ -121,43 +126,71 @@ pub mod token {
     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
     pub enum Literal {
         String,
-        Number,
-        Boolean,
-    }
-
-    impl TryFrom<&str> for Literal {
-        type Error = &'static str;
-
-        fn try_from(value: &str) -> Result<Self, Self::Error> {
-            match value {
-                x if Self::is_string(x) => Ok(Self::String),
-                x if Self::is_number(x) => Ok(Self::Number),
-                x if Self::is_boolean(x) => Ok(Self::Boolean),
-                _ => Err("Can't recognize literal type"),
-            }
-        }
+        Int,
+        Float,
+        Char,
+        Bool,
     }
 
     impl Literal {
+        pub fn parse(value: &str) -> Option<Self> {
+            match value {
+                x if Self::is_char(x) => Some(Self::Char),
+                x if Self::is_bool(x) => Some(Self::Bool),
+                x if Self::is_int(x) => Some(Self::Int),
+                x if Self::is_float(x) => Some(Self::Float),
+                x if Self::is_string(x) => Some(Self::String),
+                _ => None,
+            }
+        }
+
+        fn is_char(value: &str) -> bool {
+            value
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+        }
+
         fn is_string(value: &str) -> bool {
-            value
-                .chars()
-                .all(|c| c.is_ascii_alphabetic() || c == APOSTROPHE)
+            value.chars().all(|c| c.is_ascii_alphabetic())
         }
 
-        fn is_number(value: &str) -> bool {
+        fn is_int(value: &str) -> bool {
             value
                 .chars()
-                .all(|c| c.is_ascii_digit() || c.is_ascii_hexdigit() || c == DOT)
+                .all(|c| c.is_ascii_digit() || c.is_ascii_hexdigit())
         }
 
-        fn is_boolean(value: &str) -> bool {
+        fn is_float(value: &str) -> bool {
+            value
+                .chars()
+                .all(|c| c.is_ascii_digit() || c.is_ascii_hexdigit() || c == '.')
+        }
+
+        fn is_bool(value: &str) -> bool {
             value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false")
         }
     }
 
+    pub fn parse_symbol(input: &str) -> Option<Symbol> {
+        SYMBOLS.get(input).cloned()
+    }
+
+    static SYMBOLS: phf::Map<&'static str, Symbol> = phf_map! {
+        ":=" => Symbol::Assign,
+        ".." => Symbol::Range,
+        "." => Symbol::Dot,
+        ":" => Symbol::Colon,
+        ";" => Symbol::Semicolon,
+        "," => Symbol::Comma,
+        "(" => Symbol::LeftParenthesis,
+        ")" => Symbol::RightParenthesis,
+        "[" => Symbol::LeftBracket,
+        "]" => Symbol::RightBracket,
+    };
+
     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-    pub enum SpecialSymbol {
+    pub enum Symbol {
         Dot,
         Colon,
         Semicolon,
@@ -169,24 +202,6 @@ pub mod token {
         LeftBracket,
         RightBracket,
     }
-
-    pub fn parse_special_symbol(input: &str) -> Option<SpecialSymbol> {
-        SPECIAL_SYMBOLS.get(input).cloned()
-    }
-
-    static SPECIAL_SYMBOLS: phf::Map<&'static str, SpecialSymbol> = phf_map! {
-        ":=" => SpecialSymbol::Assign,
-        ".." => SpecialSymbol::Range,
-        "." => SpecialSymbol::Dot,
-        ":" => SpecialSymbol::Colon,
-        ";" => SpecialSymbol::Semicolon,
-        "," => SpecialSymbol::Comma,
-        "(" => SpecialSymbol::LeftParenthesis,
-        ")" => SpecialSymbol::RightParenthesis,
-        "[" => SpecialSymbol::LeftBracket,
-        "]" => SpecialSymbol::RightBracket,
-
-    };
 
     pub fn parse_keyword(input: &str) -> Option<Keyword> {
         KEYWORDS.get(input).cloned()
