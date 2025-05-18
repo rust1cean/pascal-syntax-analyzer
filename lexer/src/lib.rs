@@ -1,7 +1,15 @@
 pub mod lexer {
+    use std::ops::Range;
+
     use anyhow::Result;
 
-    use crate::token::{Position, Token};
+    use crate::token::Identifier;
+    use crate::token::Keyword;
+    use crate::token::Literal;
+    use crate::token::Position;
+    use crate::token::Symbol;
+    use crate::token::Token;
+    use crate::token::TokenKind;
 
     pub fn read_as_tokens(input: &str) -> anyhow::Result<Box<[Token]>> {
         let mut tokens = Vec::<Token>::new();
@@ -12,29 +20,92 @@ pub mod lexer {
 
         let slice = || &input[from..=to];
 
-        for c in input.chars() {
-            match mode {
-                Mode::Normal => match c {
-                    c if c.is_whitespace() && from == to => {
-                        to += 1;
+        // A..z
+        // 0..9
+        // "'+-*/%<>=.;:()[]
+
+        for c in input.chars() {}
+
+        Ok(tokens.into_boxed_slice())
+    }
+
+    #[derive(Debug, Default, Clone, PartialEq, Eq)]
+    pub struct Lexer {
+        mode: Mode,
+        range: Range<usize>,
+        position: Position,
+    }
+
+    impl<'token> Lexer {
+        pub fn parse_as_tokens(
+            &mut self,
+            input: &'token str,
+        ) -> anyhow::Result<Box<[Token<'token>]>> {
+            let mut tokens = Vec::<Token<'token>>::new();
+
+            for c in input.chars() {
+                let token = match self.mode {
+                    Mode::Normal => self.process_as_normal(c, input)?.into(),
+                    Mode::String => self.process_as_string(c, input),
+                    Mode::Number => self.process_as_number(c, input),
+                    Mode::Comment => {
+                        self.process_as_comment(c, input);
+                        None
                     }
-                    c if c.is_whitespace() => {
-                        // Validate token
-                        from = to;
-                    }
-                    c if c.is_alphabetic() || matches!(c, ':' | '<' | '>') => to += 1,
-                    '\'' => mode = Mode::String,
-                    _ => todo!(),
-                },
-                Mode::String => match c {
-                    '\'' => mode = Mode::Normal,
-                    _ => to += 1,
-                },
-                _ => (),
+                };
+
+                if let Some(t) = token {
+                    tokens.push(t);
+                }
+            }
+
+            Ok(tokens.into_boxed_slice())
+        }
+
+        fn process_as_normal(
+            &mut self,
+            c: char,
+            input: &'token str,
+        ) -> anyhow::Result<Token<'token>> {
+            match c {
+                '\'' => self.mode.set(Mode::String),
+                '{' => self.mode.set(Mode::Comment),
+            }
+
+            todo!()
+        }
+
+        fn process_as_string(&mut self, c: char, input: &'token str) -> Option<Token<'token>> {
+            match c {
+                '\'' => {
+                    self.mode.set(Mode::Normal);
+
+                    let value = self.get_slice(input);
+                    let kind = TokenKind::Literal(Literal::String);
+                    let position = self.position;
+
+                    Some(Token::new(value, kind, position))
+                }
+                _ => {
+                    self.range.end += 1;
+                    None
+                }
             }
         }
 
-        Ok(tokens.into_boxed_slice())
+        fn process_as_number(&mut self, c: char, input: &'token str) -> Option<Token<'token>> {
+            None
+        }
+
+        fn process_as_comment(&self, c: char, input: &'token str) {
+            if c == '}' {
+                self.mode.set(Mode::Normal);
+            }
+        }
+
+        fn get_slice(&self, input: &'token str) -> &'token str {
+            &input[self.range.clone()]
+        }
     }
 
     #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -44,6 +115,19 @@ pub mod lexer {
         Number,
         String,
         Comment,
+    }
+
+    impl Mode {
+        pub fn toggle(&mut self, mode: Self) {
+            match *self == mode {
+                true => self.set(Self::Normal),
+                false => self.set(mode),
+            }
+        }
+
+        pub fn set(&mut self, mode: Self) {
+            *self = mode;
+        }
     }
 }
 
@@ -69,6 +153,16 @@ pub mod token {
                 kind,
                 position,
             })
+        }
+    }
+
+    impl<'token> Token<'token> {
+        pub fn new(value: &'token str, kind: TokenKind, position: Position) -> Self {
+            Self {
+                value,
+                kind,
+                position,
+            }
         }
     }
 
